@@ -7,6 +7,7 @@ using System.Text;
 using Microsoft.ML;
 using Microsoft.ML.CommandLine;
 using Microsoft.ML.Data;
+using Microsoft.ML.Runtime;
 using Microsoft.ML.Sweeper;
 using ResultProcessor = Microsoft.ML.ResultProcessor;
 
@@ -28,12 +29,12 @@ namespace Microsoft.ML.Sweeper
 
         private readonly IHost _host;
 
-        public InternalSweepResultEvaluator(IHostEnvironment env, Options args)
+        public InternalSweepResultEvaluator(IHostEnvironment env, Options options)
         {
             Contracts.CheckValue(env, nameof(env));
             _host = env.Register("InternalSweepResultEvaluator");
-            _host.CheckNonEmpty(args.Metric, nameof(args.Metric));
-            _metric = FindMetric(args.Metric, out _maximizing);
+            _host.CheckNonEmpty(options.Metric, nameof(options.Metric));
+            _metric = FindMetric(options.Metric, out _maximizing);
         }
 
         private string FindMetric(string userMetric, out bool maximizing)

@@ -3,9 +3,9 @@
 // See the LICENSE file in the project root for more information.
 
 using System;
-using System.ComponentModel.Composition;
-using System.ComponentModel.Composition.Hosting;
+using System.Collections.Generic;
 using Microsoft.ML.Data;
+using Microsoft.ML.Runtime;
 
 namespace Microsoft.ML
 {
@@ -69,18 +69,17 @@ namespace Microsoft.ML
         public event EventHandler<LoggingEventArgs> Log;
 
         /// <summary>
-        /// This is a MEF composition container catalog to be used for model loading.
+        /// This is a catalog of components that will be used for model loading.
         /// </summary>
-        public CompositionContainer CompositionContainer { get; set; }
+        public ComponentCatalog ComponentCatalog => _env.ComponentCatalog;
 
         /// <summary>
         /// Create the ML context.
         /// </summary>
         /// <param name="seed">Random seed. Set to <c>null</c> for a non-deterministic environment.</param>
-        /// <param name="conc">Concurrency level. Set to 1 to run single-threaded. Set to 0 to pick automatically.</param>
-        public MLContext(int? seed = null, int conc = 0)
+        public MLContext(int? seed = null)
         {
-            _env = new LocalEnvironment(seed, conc, MakeCompositionContainer);
+            _env = new LocalEnvironment(seed);
             _env.AddListener(ProcessMessage);
 
             BinaryClassification = new BinaryClassificationCatalog(_env);
@@ -92,18 +91,6 @@ namespace Microsoft.ML
             Transforms = new TransformsCatalog(_env);
             Model = new ModelOperationsCatalog(_env);
             Data = new DataOperationsCatalog(_env);
-        }
-
-        private CompositionContainer MakeCompositionContainer()
-        {
-            if (CompositionContainer == null)
-                return null;
-
-            var mlContext = CompositionContainer.GetExportedValueOrDefault<MLContext>();
-            if (mlContext == null)
-                CompositionContainer.ComposeExportedValue<MLContext>(this);
-
-            return CompositionContainer;
         }
 
         private void ProcessMessage(IMessageSource source, ChannelMessage message)
@@ -118,16 +105,14 @@ namespace Microsoft.ML
             log(this, new LoggingEventArgs(msg));
         }
 
-        int IHostEnvironment.ConcurrencyFactor => _env.ConcurrencyFactor;
-        bool IHostEnvironment.IsCancelled => _env.IsCancelled;
-        ComponentCatalog IHostEnvironment.ComponentCatalog => _env.ComponentCatalog;
         string IExceptionContext.ContextDescription => _env.ContextDescription;
-        IFileHandle IHostEnvironment.CreateTempFile(string suffix, string prefix) => _env.CreateTempFile(suffix, prefix);
         TException IExceptionContext.Process<TException>(TException ex) => _env.Process(ex);
-        IHost IHostEnvironment.Register(string name, int? seed, bool? verbose, int? conc) => _env.Register(name, seed, verbose, conc);
+        IHost IHostEnvironment.Register(string name, int? seed, bool? verbose) => _env.Register(name, seed, verbose);
         IChannel IChannelProvider.Start(string name) => _env.Start(name);
         IPipe<TMessage> IChannelProvider.StartPipe<TMessage>(string name) => _env.StartPipe<TMessage>(name);
         IProgressChannel IProgressChannelProvider.StartProgressChannel(string name) => _env.StartProgressChannel(name);
-        CompositionContainer IHostEnvironment.GetCompositionContainer() => _env.GetCompositionContainer();
+
+        [BestFriend]
+        internal void CancelExecution() => ((ICancelable)_env).CancelExecution();
     }
 }

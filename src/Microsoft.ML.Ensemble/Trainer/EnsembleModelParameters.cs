@@ -4,11 +4,10 @@
 
 using System;
 using System.Threading.Tasks;
-using Microsoft.Data.DataView;
 using Microsoft.ML;
 using Microsoft.ML.Data;
 using Microsoft.ML.EntryPoints;
-using Microsoft.ML.Model;
+using Microsoft.ML.Runtime;
 using Microsoft.ML.Trainers.Ensemble;
 
 [assembly: LoadableClass(typeof(EnsembleModelParameters), null, typeof(SignatureLoadModel), EnsembleModelParameters.UserName,
@@ -45,7 +44,7 @@ namespace Microsoft.ML.Trainers.Ensemble
         private readonly VectorType _inputType;
         DataViewType IValueMapper.InputType => _inputType;
         DataViewType IValueMapper.OutputType => NumberDataViewType.Single;
-        public override PredictionKind PredictionKind { get; }
+        private protected override PredictionKind PredictionKind { get; }
 
         /// <summary>
         /// Instantiate new ensemble model from existing sub-models.

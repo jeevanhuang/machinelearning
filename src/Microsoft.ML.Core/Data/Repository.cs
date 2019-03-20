@@ -7,8 +7,9 @@ using System.Collections.Generic;
 using System.IO;
 using System.IO.Compression;
 using Microsoft.ML.Internal.Utilities;
+using Microsoft.ML.Runtime;
 
-namespace Microsoft.ML.Model
+namespace Microsoft.ML
 {
     /// <summary>
     /// For saving a model into a repository.
@@ -32,9 +33,10 @@ namespace Microsoft.ML.Model
     }
 
     /// <summary>
-    /// Abstraction around a ZipArchive or other hierarchical storage.
+    /// Abstraction around a <see cref="ZipArchive"/> or other hierarchical storage.
     /// </summary>
-    public abstract class Repository : IDisposable
+    [BestFriend]
+    internal abstract class Repository : IDisposable
     {
         public sealed class Entry : IDisposable
         {
@@ -289,7 +291,8 @@ namespace Microsoft.ML.Model
         }
     }
 
-    public sealed class RepositoryWriter : Repository
+    [BestFriend]
+    internal sealed class RepositoryWriter : Repository
     {
         private const string DirTrainingInfo = "TrainingInfo";
 
@@ -429,7 +432,8 @@ namespace Microsoft.ML.Model
         }
     }
 
-    public sealed class RepositoryReader : Repository
+    [BestFriend]
+    internal sealed class RepositoryReader : Repository
     {
         private ZipArchive _archive;
 

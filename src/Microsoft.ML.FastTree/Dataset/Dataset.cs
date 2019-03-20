@@ -7,13 +7,14 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
 using Microsoft.ML.Internal.Utilities;
+using Microsoft.ML.Runtime;
 
 namespace Microsoft.ML.Trainers.FastTree
 {
     /// <summary>
     /// A dataset of features.
     /// </summary>
-    public sealed class Dataset
+    internal sealed class Dataset
     {
         private readonly DatasetSkeleton _datasetSkeleton;
         private readonly FeatureFlockBase[] _flocks;

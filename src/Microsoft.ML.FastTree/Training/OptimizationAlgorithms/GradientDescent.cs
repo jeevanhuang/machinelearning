@@ -5,6 +5,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using Microsoft.ML.Runtime;
 
 namespace Microsoft.ML.Trainers.FastTree
 {
@@ -75,7 +76,7 @@ namespace Microsoft.ML.Trainers.FastTree
             }
             else
                 return ObjectiveFunction.GetGradient(ch, TrainingScores.Scores);
-            }
+        }
 
         protected virtual double[] AdjustTargetsAndSetWeights(IChannel ch)
         {
@@ -144,7 +145,7 @@ namespace Microsoft.ML.Trainers.FastTree
     /// <summary>
     /// Interface for wrapping with weights of gradient target values
     /// </summary>
-    public interface IGradientAdjuster
+    internal interface IGradientAdjuster
     {
         /// <summary>
         /// Create wrapping of gradient target values

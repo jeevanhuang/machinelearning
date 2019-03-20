@@ -5,8 +5,8 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using Microsoft.Data.DataView;
 using Microsoft.ML.Internal.Utilities;
+using Microsoft.ML.Runtime;
 
 namespace Microsoft.ML.Data
 {
@@ -14,7 +14,8 @@ namespace Microsoft.ML.Data
     /// This is a data view that is a 'zip' of several data views.
     /// The length of the zipped data view is equal to the shortest of the lengths of the components.
     /// </summary>
-    public sealed class ZipDataView : IDataView
+    [BestFriend]
+    internal sealed class ZipDataView : IDataView
     {
         // REVIEW: there are other potential 'zip modes' that can be implemented:
         // * 'zip longest', iterate until all sources finish, and return the 'sensible missing values' for sources that ended
@@ -160,18 +161,29 @@ namespace Microsoft.ML.Data
 
             public override DataViewSchema Schema => _zipBinding.OutputSchema;
 
-            public override bool IsColumnActive(int col)
+            /// <summary>
+            /// Returns whether the given column is active in this row.
+            /// </summary>
+            public override bool IsColumnActive(DataViewSchema.Column column)
             {
-                _zipBinding.CheckColumnInRange(col);
-                return _isColumnActive[col];
+                _zipBinding.CheckColumnInRange(column.Index);
+                return _isColumnActive[column.Index];
             }
 
-            public override ValueGetter<TValue> GetGetter<TValue>(int col)
+            /// <summary>
+            /// Returns a value getter delegate to fetch the value of column with the given columnIndex, from the row.
+            /// This throws if the column is not active in this row, or if the type
+            /// <typeparamref name="TValue"/> differs from this column's type.
+            /// </summary>
+            /// <typeparam name="TValue"> is the column's content type.</typeparam>
+            /// <param name="column"> is the output column whose getter should be returned.</param>
+            public override ValueGetter<TValue> GetGetter<TValue>(DataViewSchema.Column column)
             {
                 int dv;
                 int srcCol;
-                _zipBinding.GetColumnSource(col, out dv, out srcCol);
-                return _cursors[dv].GetGetter<TValue>(srcCol);
+                _zipBinding.GetColumnSource(column.Index, out dv, out srcCol);
+                var rowCursor = _cursors[dv];
+                return rowCursor.GetGetter<TValue>(rowCursor.Schema[srcCol]);
             }
         }
     }

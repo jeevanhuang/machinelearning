@@ -2,10 +2,14 @@
 // The .NET Foundation licenses this file to you under the MIT license.
 // See the LICENSE file in the project root for more information.
 
+using System;
 using System.IO;
 using Microsoft.ML.Data;
+using Microsoft.ML.Runtime;
+using Microsoft.ML.Transforms;
+using Microsoft.ML.Transforms.Onnx;
 
-namespace Microsoft.ML.Transforms
+namespace Microsoft.ML
 {
     /// <summary>
     /// This is an extension method to be used with the <see cref="DnnImageFeaturizerEstimator"/> in order to use a pretrained ResNet50 model.
@@ -21,13 +25,13 @@ namespace Microsoft.ML.Transforms
         /// </summary>
         public static EstimatorChain<ColumnCopyingTransformer> ResNet50(this DnnImageModelSelector dnnModelContext, IHostEnvironment env, string outputColumnName, string inputColumnName)
         {
-            return ResNet50(dnnModelContext, env, outputColumnName, inputColumnName, Path.Combine(AssemblyPathHelpers.GetExecutingAssemblyLocation(), "DnnImageModels"));
+            return ResNet50(dnnModelContext, env, outputColumnName, inputColumnName, Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "DnnImageModels"));
         }
 
         /// <summary>
         /// This allows a custom model location to be specified. This is useful is a custom model is specified,
         /// or if the model is desired to be placed or shipped separately in a different folder from the main application. Note that because Onnx models
-        /// must be in a directory all by themsleves for the OnnxTransform to work, this method appends a ResNet50Onnx/ResNetPrepOnnx subdirectory
+        /// must be in a directory all by themsleves for the OnnxTransformer to work, this method appends a ResNet50Onnx/ResNetPrepOnnx subdirectory
         /// to the passed in directory to prevent having to make that directory manually each time.
         /// </summary>
         public static EstimatorChain<ColumnCopyingTransformer> ResNet50(this DnnImageModelSelector dnnModelContext, IHostEnvironment env, string outputColumnName, string inputColumnName, string modelDir)

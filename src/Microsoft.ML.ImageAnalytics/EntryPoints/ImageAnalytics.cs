@@ -3,13 +3,15 @@
 // See the LICENSE file in the project root for more information.
 
 using Microsoft.ML;
+using Microsoft.ML.Data;
 using Microsoft.ML.EntryPoints;
-using Microsoft.ML.ImageAnalytics.EntryPoints;
+using Microsoft.ML.Runtime;
+using Microsoft.ML.Transforms.Image;
 
-[assembly: LoadableClass(typeof(void), typeof(ImageAnalytics), null, typeof(SignatureEntryPointModule), "ImageAnalytics")]
-namespace Microsoft.ML.ImageAnalytics.EntryPoints
+[assembly: LoadableClass(typeof(void), typeof(ImageAnalyticsEntryPoints), null, typeof(SignatureEntryPointModule), "ImageAnalytics")]
+namespace Microsoft.ML.Transforms.Image
 {
-    internal static class ImageAnalytics
+    internal static class ImageAnalyticsEntryPoints
     {
         [TlcModule.EntryPoint(Name = "Transforms.ImageLoader", Desc = ImageLoadingTransformer.Summary,
             UserName = ImageLoadingTransformer.UserName, ShortName = ImageLoadingTransformer.LoaderSignature)]
@@ -63,12 +65,12 @@ namespace Microsoft.ML.ImageAnalytics.EntryPoints
             };
         }
 
-        [TlcModule.EntryPoint(Name = "Transforms.VectorToImage", Desc = VectorToImageTransform.Summary,
-            UserName = VectorToImageTransform.UserName, ShortName = VectorToImageTransform.LoaderSignature)]
-        public static CommonOutputs.TransformOutput VectorToImage(IHostEnvironment env, VectorToImageTransform.Arguments input)
+        [TlcModule.EntryPoint(Name = "Transforms.VectorToImage", Desc = VectorToImageConvertingTransformer.Summary,
+            UserName = VectorToImageConvertingTransformer.UserName, ShortName = VectorToImageConvertingTransformer.LoaderSignature)]
+        public static CommonOutputs.TransformOutput VectorToImage(IHostEnvironment env, VectorToImageConvertingTransformer.Options input)
         {
             var h = EntryPointUtils.CheckArgsAndCreateHost(env, "VectorToImageTransform", input);
-            var xf = new VectorToImageTransform(h, input, input.Data);
+            var xf = VectorToImageConvertingTransformer.Create(h, input, input.Data);
             return new CommonOutputs.TransformOutput()
             {
                 Model = new TransformModelImpl(h, xf, input.Data),

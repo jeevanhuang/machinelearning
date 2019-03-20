@@ -5,11 +5,10 @@
 using System;
 using System.IO;
 using System.Text;
-using Microsoft.Data.DataView;
 using Microsoft.ML;
 using Microsoft.ML.Data;
 using Microsoft.ML.Internal.Utilities;
-using Microsoft.ML.Model;
+using Microsoft.ML.Runtime;
 using Microsoft.ML.Transforms;
 
 [assembly: LoadableClass(typeof(ITransformer), typeof(LambdaTransform), null, typeof(SignatureLoadModel), "", LambdaTransform.LoaderSignature)]
@@ -68,11 +67,13 @@ namespace Microsoft.ML.Transforms
 
             var contractName = ctx.LoadString();
 
-            var composition = env.GetCompositionContainer();
-            if (composition == null)
-                throw Contracts.Except("Unable to get the MEF composition container");
-            ITransformer transformer = composition.GetExportedValue<ITransformer>(contractName);
-            return transformer;
+            object factoryObject = env.ComponentCatalog.GetExtensionValue(env, typeof(CustomMappingFactoryAttributeAttribute), contractName);
+            if (!(factoryObject is ICustomMappingFactory mappingFactory))
+            {
+                throw env.Except($"The class with contract '{contractName}' must derive from '{typeof(CustomMappingFactory<,>).FullName}'.");
+            }
+
+            return mappingFactory.CreateTransformer(env, contractName);
         }
 
         /// <summary>

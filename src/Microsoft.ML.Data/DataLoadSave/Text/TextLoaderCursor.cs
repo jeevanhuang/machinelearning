@@ -3,13 +3,12 @@
 // See the LICENSE file in the project root for more information.
 
 using System;
-using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
-using Microsoft.Data.DataView;
 using Microsoft.ML.Internal.Utilities;
+using Microsoft.ML.Runtime;
 
 namespace Microsoft.ML.Data
 {
@@ -71,7 +70,7 @@ namespace Microsoft.ML.Data
                 Contracts.Assert(srcNeeded >= 0);
 
                 // Determine the number of threads to use.
-                cthd = DataViewUtils.GetThreadCount(parent._host, n, !parent._useThreads);
+                cthd = DataViewUtils.GetThreadCount(n, !parent._useThreads);
 
                 long cblkMax = parent._maxRows / BatchSize;
                 if (cthd > cblkMax)
@@ -297,16 +296,28 @@ namespace Microsoft.ML.Data
                 return false;
             }
 
-            public override bool IsColumnActive(int col)
+            /// <summary>
+            /// Returns whether the given column is active in this row.
+            /// </summary>
+            public override bool IsColumnActive(DataViewSchema.Column column)
             {
-                Ch.Check(0 <= col && col < _bindings.Infos.Length);
-                return _active == null || _active[col];
+                Ch.Check(column.Index < _bindings.Infos.Length);
+                return _active == null || _active[column.Index];
             }
 
-            public override ValueGetter<TValue> GetGetter<TValue>(int col)
+            /// <summary>
+            /// Returns a value getter delegate to fetch the value of column with the given columnIndex, from the row.
+            /// This throws if the column is not active in this row, or if the type
+            /// <typeparamref name="TValue"/> differs from this column's type.
+            /// </summary>
+            /// <typeparam name="TValue"> is the column's content type.</typeparam>
+            /// <param name="column"> is the output column whose getter should be returned.</param>
+            public override ValueGetter<TValue> GetGetter<TValue>(DataViewSchema.Column column)
             {
-                Ch.Check(IsColumnActive(col));
-                var fn = _getters[col] as ValueGetter<TValue>;
+                Ch.CheckParam(column.Index < _getters.Length, nameof(column), "requested column not valid.");
+                Ch.Check(IsColumnActive(column));
+
+                var fn = _getters[column.Index] as ValueGetter<TValue>;
                 if (fn == null)
                     throw Ch.Except("Invalid TValue in GetGetter: '{0}'", typeof(TValue));
                 return fn;
@@ -395,7 +406,7 @@ namespace Microsoft.ML.Data
 
                 // The line reader can be referenced by multiple workers. This is the reference count.
                 private int _cref;
-                private BlockingCollection<LineBatch> _queue;
+                private BlockingQueue<LineBatch> _queue;
                 private Task _thdRead;
                 private volatile bool _abort;
 
@@ -415,7 +426,7 @@ namespace Microsoft.ML.Data
                     _files = files;
                     _cref = cref;
 
-                    _queue = new BlockingCollection<LineBatch>(bufSize);
+                    _queue = new BlockingQueue<LineBatch>(bufSize);
                     _thdRead = Utils.RunOnBackgroundThread(ThreadProc);
                 }
 
@@ -638,7 +649,7 @@ namespace Microsoft.ML.Data
                 private readonly OrderedWaiter _waiterPublish;
 
                 // A small capacity blocking collection that the main cursor thread consumes.
-                private readonly BlockingCollection<RowBatch> _queue;
+                private readonly BlockingQueue<RowBatch> _queue;
 
                 private readonly Task[] _threads;
 
@@ -673,7 +684,7 @@ namespace Microsoft.ML.Data
 
                     // The size limit here ensures that worker threads are never writing to
                     // a range that is being served up by the cursor.
-                    _queue = new BlockingCollection<RowBatch>(2);
+                    _queue = new BlockingQueue<RowBatch>(2);
 
                     _threads = new Task[cthd];
                     _threadsRunning = cthd;

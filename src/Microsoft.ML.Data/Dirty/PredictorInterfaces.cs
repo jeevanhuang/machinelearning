@@ -5,18 +5,11 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
-using Microsoft.Data.DataView;
-using Microsoft.ML.Calibrator;
+using Microsoft.ML.Calibrators;
 using Microsoft.ML.Data;
 
-namespace Microsoft.ML.Internal.Internallearn
+namespace Microsoft.ML.Model
 {
-
-    /// <summary>
-    /// Signature for loading from a file name.
-    /// </summary>
-    public delegate void SignaturePredictorFromFile(string fileName);
-
     /// <summary>
     /// A generic interface for models that can average parameters from multiple instance of self
     /// </summary>
@@ -66,22 +59,6 @@ namespace Microsoft.ML.Internal.Internallearn
     internal interface IQuantileValueMapper
     {
         ValueMapper<VBuffer<float>, VBuffer<float>> GetMapper(float[] quantiles);
-    }
-
-    /// <summary>
-    /// Interface for quantile distribution
-    /// </summary>
-    /// <typeparam name="TResult">Type of statistics result</typeparam>
-    [BestFriend]
-    internal interface IQuantileDistribution<TResult> : IDistribution<TResult>, ISampleableDistribution<TResult>
-    {
-        TResult Median { get; }
-
-        /// <summary>
-        /// Returns an estimate of the p-th quantile, the data value where proportionately p of the data has value
-        /// less than or equal to the returned value.
-        /// </summary>
-        TResult GetQuantile(float p);
     }
 
     [BestFriend]
@@ -162,12 +139,14 @@ namespace Microsoft.ML.Internal.Internallearn
     /// <summary>
     /// Signature for trainers that produce predictors that in turn can be use to score features.
     /// </summary>
-    public delegate void SignatureFeatureScorerTrainer();
+    [BestFriend]
+    internal delegate void SignatureFeatureScorerTrainer();
 
     /// <summary>
     /// Interface implemented by components that can assign weights to features.
     /// </summary>
-    public interface IHaveFeatureWeights
+    [BestFriend]
+    internal interface IHaveFeatureWeights
     {
         /// <summary>
         /// Returns the weights for the features.
@@ -182,43 +161,9 @@ namespace Microsoft.ML.Internal.Internallearn
     /// <summary>
     /// Interface implemented by predictors that can score features.
     /// </summary>
-    public interface IPredictorWithFeatureWeights<out TResult> : IHaveFeatureWeights, IPredictorProducing<TResult>
-    {
-    }
-
-    /// <summary>
-    /// Interface for mapping input values to corresponding feature contributions.
-    /// This interface is commonly implemented by predictors.
-    /// </summary>
     [BestFriend]
-    internal interface IFeatureContributionMapper : IPredictor
+    internal interface IPredictorWithFeatureWeights<out TResult> : IHaveFeatureWeights, IPredictorProducing<TResult>
     {
-        /// <summary>
-        /// Get a delegate for mapping Contributions to Features.
-        /// Result will contain vector with topN positive contributions(if available) and
-        /// bottomN negative contributions (if available).
-        /// For example linear predictor will have both negative and positive contributions.
-        /// For trees we will not have negative contributions, so bottom param will be ignored.
-        /// If normalization is requested that resulting values will be normalized to [-1, 1].
-        /// </summary>
-        ValueMapper<TSrc, VBuffer<float>> GetFeatureContributionMapper<TSrc, TDst>(int top, int bottom, bool normalize);
-    }
-
-    /// <summary>
-    /// Allows support for feature contribution calculation.
-    /// </summary>
-    public interface ICalculateFeatureContribution : IPredictor
-    {
-        FeatureContributionCalculator FeatureContributionCalculator { get; }
-    }
-
-    /// <summary>
-    /// Support for feature contribution calculation.
-    /// </summary>
-    public sealed class FeatureContributionCalculator
-    {
-        internal IFeatureContributionMapper ContributionMapper { get; }
-        internal FeatureContributionCalculator(IFeatureContributionMapper contributionMapper) => ContributionMapper = contributionMapper;
     }
 
     /// <summary>
@@ -226,7 +171,8 @@ namespace Microsoft.ML.Internal.Internallearn
     /// If the training label is a key with text key value metadata, it should return this metadata. The order of the labels should be consistent
     /// with the key values. Otherwise, it returns null.
     /// </summary>
-    public interface ICanGetTrainingLabelNames : IPredictor
+    [BestFriend]
+    internal interface ICanGetTrainingLabelNames : IPredictor
     {
         string[] GetLabelNamesOrNull(out DataViewType labelType);
     }

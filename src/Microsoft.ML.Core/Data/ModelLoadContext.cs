@@ -6,8 +6,9 @@ using System;
 using System.IO;
 using System.Text;
 using Microsoft.ML.Internal.Utilities;
+using Microsoft.ML.Runtime;
 
-namespace Microsoft.ML.Model
+namespace Microsoft.ML
 {
     /// <summary>
     /// This is a convenience context object for loading models from a repository, for
@@ -15,7 +16,8 @@ namespace Microsoft.ML.Model
     /// amount of boiler plate code. It can also be used when loading from a single stream,
     /// for implementors of ICanSaveInBinaryFormat.
     /// </summary>
-    public sealed partial class ModelLoadContext : IDisposable
+    [BestFriend]
+    internal sealed partial class ModelLoadContext : IDisposable
     {
         /// <summary>
         /// When in repository mode, this is the repository we're reading from. It is null when

@@ -8,15 +8,15 @@ using System.Linq;
 using System.Text;
 using Microsoft.ML.CommandLine;
 using Microsoft.ML.Internal.Utilities;
+using Microsoft.ML.Runtime;
 
 namespace Microsoft.ML.Internal.Internallearn
 {
-    using Float = System.Single;
-
     /// <summary>
     /// Various utilities
     /// </summary>
-    public static class PredictionUtil
+    [BestFriend]
+    internal static class PredictionUtil
     {
         /// <summary>
         /// generic method for parsing arguments using CommandLine. If there's a problem, it throws an InvalidOperationException, with a message giving usage.
@@ -91,7 +91,7 @@ namespace Microsoft.ML.Internal.Internallearn
         /// <summary>
         /// Make a string representation of an array
         /// </summary>
-        public static string Array2String(Float[] a, string sep)
+        public static string Array2String(float[] a, string sep)
         {
             StringBuilder sb = new StringBuilder();
             if (a.Length == 0)
@@ -150,18 +150,6 @@ namespace Microsoft.ML.Internal.Internallearn
                     return s[0];
                 return default(char);
             }
-        }
-    }
-
-    /// <summary>
-    /// A generic reverse Comparer (for use in Array.Sort)
-    /// </summary>
-    public sealed class ReverseComparer<T> : IComparer<T>
-        where T : IComparable<T>
-    {
-        public int Compare(T x, T y)
-        {
-            return -x.CompareTo(y);
         }
     }
 }

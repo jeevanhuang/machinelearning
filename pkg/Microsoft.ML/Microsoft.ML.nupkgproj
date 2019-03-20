@@ -6,7 +6,7 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <ProjectReference Include="../Microsoft.Data.DataView/Microsoft.Data.DataView.nupkgproj" />
+    <ProjectReference Include="../Microsoft.ML.DataView/Microsoft.ML.DataView.nupkgproj" />
     <ProjectReference Include="../Microsoft.ML.CpuMath/Microsoft.ML.CpuMath.nupkgproj" />
 
     <PackageReference Include="Newtonsoft.Json" Version="$(NewtonsoftJsonPackageVersion)" />
@@ -15,7 +15,6 @@
     <PackageReference Include="System.CodeDom" Version="$(SystemCodeDomPackageVersion)" />
     <PackageReference Include="System.Memory" Version="$(SystemMemoryVersion)" />
     <PackageReference Include="System.Collections.Immutable" Version="$(SystemCollectionsImmutableVersion)" />
-    <PackageReference Include="System.ComponentModel.Composition" Version="$(SystemComponentModelCompositionVersion)" />
   </ItemGroup>
 
   <ItemGroup>

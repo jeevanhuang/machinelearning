@@ -7,8 +7,9 @@ using System.IO;
 using System.Reflection;
 using System.Text;
 using Microsoft.ML.Internal.Utilities;
+using Microsoft.ML.Runtime;
 
-namespace Microsoft.ML.Model
+namespace Microsoft.ML
 {
     /// <summary>
     /// Signature for a repository based model loader. This is the dual of <see cref="ICanSaveModel"/>.
@@ -16,10 +17,34 @@ namespace Microsoft.ML.Model
     [BestFriend]
     internal delegate void SignatureLoadModel(ModelLoadContext ctx);
 
-    public sealed partial class ModelLoadContext : IDisposable
+    internal sealed partial class ModelLoadContext : IDisposable
     {
         public const string ModelStreamName = "Model.key";
         internal const string NameBinary = "Model.bin";
+
+        /// <summary>
+        /// Returns the new assembly name to maintain backward compatibility.
+        /// </summary>
+        private string ForwardedLoaderAssemblyName
+        {
+            get
+            {
+                string[] nameDetails = LoaderAssemblyName.Split(',');
+                switch (nameDetails[0])
+                {
+                    case "Microsoft.ML.HalLearners":
+                        nameDetails[0] = "Microsoft.ML.Mkl.Components";
+                        break;
+                    case "Microsoft.ML.StandardLearners":
+                        nameDetails[0] = "Microsoft.ML.StandardTrainers";
+                        break;
+                    default:
+                        return LoaderAssemblyName;
+                }
+
+                return string.Join(",", nameDetails);
+            }
+        }
 
         /// <summary>
         /// Return whether this context contains a directory and stream for a sub-model with
@@ -142,6 +167,7 @@ namespace Microsoft.ML.Model
 
             // TryLoadModelCore should rewind on failure.
             Contracts.Assert(fp == ent.Stream.Position);
+
             return false;
         }
 
@@ -259,7 +285,7 @@ namespace Microsoft.ML.Model
         {
             if (!string.IsNullOrEmpty(LoaderAssemblyName))
             {
-                var assembly = Assembly.Load(LoaderAssemblyName);
+                var assembly = Assembly.Load(ForwardedLoaderAssemblyName);
                 catalog.RegisterAssembly(assembly);
             }
         }

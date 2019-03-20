@@ -8,15 +8,13 @@ using System.Linq;
 using System.Runtime.InteropServices;
 using System.Security;
 using System.Text;
-using Microsoft.Data.DataView;
 using Microsoft.ML;
 using Microsoft.ML.Data;
 using Microsoft.ML.EntryPoints;
-using Microsoft.ML.Internal.Internallearn;
 using Microsoft.ML.Internal.Utilities;
 using Microsoft.ML.Model;
+using Microsoft.ML.Runtime;
 using Microsoft.ML.Trainers.FastTree;
-using Microsoft.ML.Training;
 
 // REVIEW: Do we really need all these names?
 [assembly: LoadableClass(FastTreeRankingTrainer.Summary, typeof(FastTreeRankingTrainer), typeof(FastTreeRankingTrainer.Options),
@@ -40,7 +38,10 @@ using Microsoft.ML.Training;
 
 namespace Microsoft.ML.Trainers.FastTree
 {
-    /// <include file='doc.xml' path='doc/members/member[@name="FastTree"]/*' />
+    /// <summary>
+    /// The <see cref="IEstimator{TTransformer}"/> for training a decision tree ranking model using FastTree.
+    /// </summary>
+    /// <include file='doc.xml' path='doc/members/member[@name="FastTree_remarks"]/*' />
     public sealed partial class FastTreeRankingTrainer
         : BoostingFastTreeTrainerBase<FastTreeRankingTrainer.Options, RankingPredictionTransformer<FastTreeRankingModelParameters>, FastTreeRankingModelParameters>
     {
@@ -56,32 +57,32 @@ namespace Microsoft.ML.Trainers.FastTree
         /// <summary>
         /// The prediction kind for this trainer.
         /// </summary>
-        public override PredictionKind PredictionKind => PredictionKind.Ranking;
+        private protected override PredictionKind PredictionKind => PredictionKind.Ranking;
 
         /// <summary>
         /// Initializes a new instance of <see cref="FastTreeRankingTrainer"/>
         /// </summary>
         /// <param name="env">The private instance of <see cref="IHostEnvironment"/>.</param>
-        /// <param name="labelColumn">The name of the label column.</param>
-        /// <param name="featureColumn">The name of the feature column.</param>
-        /// <param name="groupIdColumn">The name for the column containing the group ID. </param>
-        /// <param name="weightColumn">The name for the column containing the initial weight.</param>
-        /// <param name="numLeaves">The max number of leaves in each regression tree.</param>
-        /// <param name="numTrees">Total number of decision trees to create in the ensemble.</param>
-        /// <param name="minDatapointsInLeaves">The minimal number of documents allowed in a leaf of a regression tree, out of the subsampled data.</param>
+        /// <param name="labelColumnName">The name of the label column.</param>
+        /// <param name="featureColumnName">The name of the feature column.</param>
+        /// <param name="rowGroupColumnName">The name for the column containing the group ID. </param>
+        /// <param name="exampleWeightColumnName">The name for the column containing the examle weight.</param>
+        /// <param name="numberOfLeaves">The max number of leaves in each regression tree.</param>
+        /// <param name="numberOfTrees">Total number of decision trees to create in the ensemble.</param>
+        /// <param name="minimumExampleCountPerLeaf">The minimal number of examples allowed in a leaf of a regression tree, out of the subsampled data.</param>
         /// <param name="learningRate">The learning rate.</param>
         internal FastTreeRankingTrainer(IHostEnvironment env,
-            string labelColumn = DefaultColumnNames.Label,
-            string featureColumn = DefaultColumnNames.Features,
-            string groupIdColumn = DefaultColumnNames.GroupId,
-            string weightColumn = null,
-            int numLeaves = Defaults.NumLeaves,
-            int numTrees = Defaults.NumTrees,
-            int minDatapointsInLeaves = Defaults.MinDocumentsInLeaves,
-            double learningRate = Defaults.LearningRates)
-            : base(env, TrainerUtils.MakeR4ScalarColumn(labelColumn), featureColumn, weightColumn, groupIdColumn, numLeaves, numTrees, minDatapointsInLeaves, learningRate)
+            string labelColumnName = DefaultColumnNames.Label,
+            string featureColumnName = DefaultColumnNames.Features,
+            string rowGroupColumnName = DefaultColumnNames.GroupId,
+            string exampleWeightColumnName = null,
+            int numberOfLeaves = Defaults.NumberOfLeaves,
+            int numberOfTrees = Defaults.NumberOfTrees,
+            int minimumExampleCountPerLeaf = Defaults.MinimumExampleCountPerLeaf,
+            double learningRate = Defaults.LearningRate)
+            : base(env, TrainerUtils.MakeR4ScalarColumn(labelColumnName), featureColumnName, exampleWeightColumnName, rowGroupColumnName, numberOfLeaves, numberOfTrees, minimumExampleCountPerLeaf, learningRate)
         {
-            Host.CheckNonEmpty(groupIdColumn, nameof(groupIdColumn));
+            Host.CheckNonEmpty(rowGroupColumnName, nameof(rowGroupColumnName));
         }
 
         /// <summary>
@@ -90,7 +91,7 @@ namespace Microsoft.ML.Trainers.FastTree
         /// <param name="env">The instance of <see cref="IHostEnvironment"/>.</param>
         /// <param name="options">Algorithm advanced settings.</param>
         internal FastTreeRankingTrainer(IHostEnvironment env, Options options)
-        : base(env, options, TrainerUtils.MakeR4ScalarColumn(options.LabelColumn))
+        : base(env, options, TrainerUtils.MakeR4ScalarColumn(options.LabelColumnName))
         {
         }
 
@@ -106,7 +107,8 @@ namespace Microsoft.ML.Trainers.FastTree
             if (!labelCol.IsKey && labelCol.ItemType != NumberDataViewType.Single)
                 error();
         }
-        protected override float GetMaxLabel()
+
+        private protected override float GetMaxLabel()
         {
             return GetLabelGains().Length - 1;
         }
@@ -125,7 +127,7 @@ namespace Microsoft.ML.Trainers.FastTree
                 TrainCore(ch);
                 FeatureCount = trainData.Schema.Feature.Value.Type.GetValueCount();
             }
-            return new FastTreeRankingModelParameters(Host, TrainedEnsemble, FeatureCount, InnerArgs);
+            return new FastTreeRankingModelParameters(Host, TrainedEnsemble, FeatureCount, InnerOptions);
         }
 
         private Double[] GetLabelGains()
@@ -133,7 +135,7 @@ namespace Microsoft.ML.Trainers.FastTree
             try
             {
                 Host.AssertValue(FastTreeTrainerOptions.CustomGains);
-                return FastTreeTrainerOptions.CustomGains.Split(',').Select(k => Convert.ToDouble(k.Trim())).ToArray();
+                return FastTreeTrainerOptions.CustomGains;
             }
             catch (Exception ex)
             {
@@ -143,47 +145,42 @@ namespace Microsoft.ML.Trainers.FastTree
             }
         }
 
-        protected override void CheckArgs(IChannel ch)
+        private protected override void CheckOptions(IChannel ch)
         {
-            if (!string.IsNullOrEmpty(FastTreeTrainerOptions.CustomGains))
+            if (FastTreeTrainerOptions.CustomGains != null)
             {
-                var stringGain = FastTreeTrainerOptions.CustomGains.Split(',');
-                if (stringGain.Length < 5)
+                var gains = FastTreeTrainerOptions.CustomGains;
+                if (gains.Length < 5)
                 {
                     throw ch.ExceptUserArg(nameof(FastTreeTrainerOptions.CustomGains),
-                        "{0} an invalid number of gain levels. We require at least 5. Make certain they're comma separated.",
-                        stringGain.Length);
+                        "Has {0} gain levels. We require at least 5 elements.",
+                        gains.Length);
                 }
-                Double[] gain = new Double[stringGain.Length];
-                for (int i = 0; i < stringGain.Length; ++i)
-                {
-                    if (!Double.TryParse(stringGain[i], out gain[i]))
-                    {
-                        throw ch.ExceptUserArg(nameof(FastTreeTrainerOptions.CustomGains),
-                            "Could not parse '{0}' as a floating point number", stringGain[0]);
-                    }
-                }
-                DcgCalculator.LabelGainMap = gain;
-                Dataset.DatasetSkeleton.LabelGainMap = gain;
+                DcgCalculator.LabelGainMap = gains;
+                Dataset.DatasetSkeleton.LabelGainMap = gains;
             }
 
-            ch.CheckUserArg((FastTreeTrainerOptions.EarlyStoppingRule == null && !FastTreeTrainerOptions.EnablePruning) || (FastTreeTrainerOptions.EarlyStoppingMetrics == 1 || FastTreeTrainerOptions.EarlyStoppingMetrics == 3), nameof(FastTreeTrainerOptions.EarlyStoppingMetrics),
-                "earlyStoppingMetrics should be 1 or 3.");
+            bool doEarlyStop = FastTreeTrainerOptions.EarlyStoppingRuleFactory != null ||
+                FastTreeTrainerOptions.EnablePruning;
 
-            base.CheckArgs(ch);
+            if (doEarlyStop)
+                ch.CheckUserArg(FastTreeTrainerOptions.EarlyStoppingMetrics == 1 || FastTreeTrainerOptions.EarlyStoppingMetrics == 3,
+                    nameof(FastTreeTrainerOptions.EarlyStoppingMetrics), "should be 1 or 3.");
+
+            base.CheckOptions(ch);
         }
 
-        protected override void Initialize(IChannel ch)
+        private protected override void Initialize(IChannel ch)
         {
             base.Initialize(ch);
             if (FastTreeTrainerOptions.CompressEnsemble)
             {
                 _ensembleCompressor = new LassoBasedEnsembleCompressor();
-                _ensembleCompressor.Initialize(FastTreeTrainerOptions.NumTrees, TrainSet, TrainSet.Ratings, FastTreeTrainerOptions.RngSeed);
+                _ensembleCompressor.Initialize(FastTreeTrainerOptions.NumberOfTrees, TrainSet, TrainSet.Ratings, FastTreeTrainerOptions.Seed);
             }
         }
 
-        protected override ObjectiveFunctionBase ConstructObjFunc(IChannel ch)
+        private protected override ObjectiveFunctionBase ConstructObjFunc(IChannel ch)
         {
             return new LambdaRankObjectiveFunction(TrainSet, TrainSet.Ratings, FastTreeTrainerOptions, ParallelTraining);
         }
@@ -194,27 +191,27 @@ namespace Microsoft.ML.Trainers.FastTree
             if (FastTreeTrainerOptions.UseLineSearch)
             {
                 _specialTrainSetTest = new FastNdcgTest(optimizationAlgorithm.TrainingScores, TrainSet.Ratings, FastTreeTrainerOptions.SortingAlgorithm, FastTreeTrainerOptions.EarlyStoppingMetrics);
-                optimizationAlgorithm.AdjustTreeOutputsOverride = new LineSearch(_specialTrainSetTest, 0, FastTreeTrainerOptions.NumPostBracketSteps, FastTreeTrainerOptions.MinStepSize);
+                optimizationAlgorithm.AdjustTreeOutputsOverride = new LineSearch(_specialTrainSetTest, 0, FastTreeTrainerOptions.MaximumNumberOfLineSearchSteps, FastTreeTrainerOptions.MinimumStepSize);
             }
             return optimizationAlgorithm;
         }
 
-        protected override BaggingProvider CreateBaggingProvider()
+        private protected override BaggingProvider CreateBaggingProvider()
         {
             Host.Assert(FastTreeTrainerOptions.BaggingSize > 0);
-            return new RankingBaggingProvider(TrainSet, FastTreeTrainerOptions.NumLeaves, FastTreeTrainerOptions.RngSeed, FastTreeTrainerOptions.BaggingTrainFraction);
+            return new RankingBaggingProvider(TrainSet, FastTreeTrainerOptions.NumberOfLeaves, FastTreeTrainerOptions.Seed, FastTreeTrainerOptions.BaggingExampleFraction);
         }
 
-        protected override void PrepareLabels(IChannel ch)
+        private protected override void PrepareLabels(IChannel ch)
         {
         }
 
-        protected override Test ConstructTestForTrainingData()
+        private protected override Test ConstructTestForTrainingData()
         {
             return new NdcgTest(ConstructScoreTracker(TrainSet), TrainSet.Ratings, FastTreeTrainerOptions.SortingAlgorithm);
         }
 
-        protected override void InitializeTests()
+        private protected override void InitializeTests()
         {
             if (FastTreeTrainerOptions.TestFrequency != int.MaxValue)
             {
@@ -280,7 +277,7 @@ namespace Microsoft.ML.Trainers.FastTree
             }
         }
 
-        protected override void PrintIterationMessage(IChannel ch, IProgressChannel pch)
+        private protected override void PrintIterationMessage(IChannel ch, IProgressChannel pch)
         {
             // REVIEW: Shift to using progress channels to report this information.
 #if OLD_TRACE
@@ -316,7 +313,7 @@ namespace Microsoft.ML.Trainers.FastTree
 #endif
         }
 
-        protected override void ComputeTests()
+        private protected override void ComputeTests()
         {
             if (_firstTestSetHistory != null)
                 _firstTestSetHistory.ComputeTests();
@@ -328,7 +325,7 @@ namespace Microsoft.ML.Trainers.FastTree
                 PruningTest.ComputeTests();
         }
 
-        protected override string GetTestGraphLine()
+        private protected override string GetTestGraphLine()
         {
             StringBuilder lineBuilder = new StringBuilder();
 
@@ -361,7 +358,7 @@ namespace Microsoft.ML.Trainers.FastTree
             return lineBuilder.ToString();
         }
 
-        protected override void Train(IChannel ch)
+        private protected override void Train(IChannel ch)
         {
             base.Train(ch);
             // Print final last iteration.
@@ -438,7 +435,7 @@ namespace Microsoft.ML.Trainers.FastTree
         /// Get the header of test graph
         /// </summary>
         /// <returns>Test graph header</returns>
-        protected override string GetTestGraphHeader()
+        private protected override string GetTestGraphHeader()
         {
             StringBuilder headerBuilder = new StringBuilder("Eval:\tFileName\tNDCG@1\tNDCG@2\tNDCG@3\tNDCG@4\tNDCG@5\tNDCG@6\tNDCG@7\tNDCG@8\tNDCG@9\tNDCG@10");
 
@@ -467,7 +464,7 @@ namespace Microsoft.ML.Trainers.FastTree
         {
             return new[]
            {
-                new SchemaShape.Column(DefaultColumnNames.Score, SchemaShape.Column.VectorKind.Scalar, NumberDataViewType.Single, false, new SchemaShape(MetadataUtils.GetTrainerOutputMetadata()))
+                new SchemaShape.Column(DefaultColumnNames.Score, SchemaShape.Column.VectorKind.Scalar, NumberDataViewType.Single, false, new SchemaShape(AnnotationUtils.GetTrainerOutputAnnotation()))
             };
         }
 
@@ -500,7 +497,7 @@ namespace Microsoft.ML.Trainers.FastTree
 
             // parameters
             private int _maxDcgTruncationLevel;
-            private bool _trainDcg;
+            private bool _useDcg;
             // A lookup table for the sigmoid used in the lambda calculation
             // Note: Is built for a specific sigmoid parameter, so assumes this will be constant throughout computation
             private double[] _sigmoidTable;
@@ -553,12 +550,12 @@ namespace Microsoft.ML.Trainers.FastTree
 
             public LambdaRankObjectiveFunction(Dataset trainset, short[] labels, Options options, IParallelTraining parallelTraining)
                 : base(trainset,
-                    options.LearningRates,
+                    options.LearningRate,
                     options.Shrinkage,
-                    options.MaxTreeOutput,
+                    options.MaximumTreeOutput,
                     options.GetDerivativesSampleRate,
                     options.BestStepRankingRegressionTrees,
-                    options.RngSeed)
+                    options.Seed)
             {
 
                 _labels = labels;
@@ -572,9 +569,9 @@ namespace Microsoft.ML.Trainers.FastTree
                     _labelCounts[q] = new int[relevancyLevel];
 
                 // precomputed arrays
-                _maxDcgTruncationLevel = options.LambdaMartMaxTruncation;
-                _trainDcg = options.TrainDcg;
-                if (_trainDcg)
+                _maxDcgTruncationLevel = options.NdcgTruncationLevel;
+                _useDcg = options.UseDcg;
+                if (_useDcg)
                 {
                     _inverseMaxDcgt = new double[Dataset.NumQueries];
                     for (int q = 0; q < Dataset.NumQueries; ++q)
@@ -608,7 +605,7 @@ namespace Microsoft.ML.Trainers.FastTree
                 FillGainLabels();
 
                 #region parameters
-                _sigmoidParam = options.LearningRates;
+                _sigmoidParam = options.LearningRate;
                 _costFunctionParam = options.CostFunctionParam;
                 _distanceWeight2 = options.DistanceWeight2;
                 _normalizeQueryLambdas = options.NormalizeQueryLambdas;
@@ -677,7 +674,7 @@ namespace Microsoft.ML.Trainers.FastTree
                 uint[] vals = new uint[ffmap.RawFeatureCount];
                 int iInd = Array.IndexOf(ffnames, "I");
                 int tInd = Array.IndexOf(ffnames, "T");
-                int totalTrees = options.NumTrees;
+                int totalTrees = options.NumberOfTrees;
                 if (tInd >= 0)
                     vals[tInd] = (uint)totalTrees;
                 _baselineAlpha = Enumerable.Range(0, totalTrees).Select(i =>
@@ -877,7 +874,7 @@ namespace Microsoft.ML.Trainers.FastTree
 
                         // Continous cost function and shifted NDCG require a re-sort and recomputation of maxDCG
                         // (Change of scores in the former and scores and labels in the latter)
-                        if (!_trainDcg && (_costFunctionParam == 'c' || _useShiftedNdcg))
+                        if (!_useDcg && (_costFunctionParam == 'c' || _useShiftedNdcg))
                         {
                             PermutationSort(permutation, scoresToUse, labels, numDocuments, begin);
                             inverseMaxDcg = 1.0 / DcgCalculator.MaxDcgQuery(labels, begin, numDocuments, numDocuments, _labelCounts[query]);
@@ -1127,11 +1124,11 @@ namespace Microsoft.ML.Trainers.FastTree
                 loaderAssemblyName: typeof(FastTreeRankingModelParameters).Assembly.FullName);
         }
 
-        protected override uint VerNumFeaturesSerialized => 0x00010002;
+        private protected override uint VerNumFeaturesSerialized => 0x00010002;
 
-        protected override uint VerDefaultValueSerialized => 0x00010004;
+        private protected override uint VerDefaultValueSerialized => 0x00010004;
 
-        protected override uint VerCategoricalSplitSerialized => 0x00010005;
+        private protected override uint VerCategoricalSplitSerialized => 0x00010005;
 
         internal FastTreeRankingModelParameters(IHostEnvironment env, InternalTreeEnsemble trainedEnsemble, int featureCount, string innerArgs)
             : base(env, RegistrationName, trainedEnsemble, featureCount, innerArgs)
@@ -1154,7 +1151,7 @@ namespace Microsoft.ML.Trainers.FastTree
             return new FastTreeRankingModelParameters(env, ctx);
         }
 
-        public override PredictionKind PredictionKind => PredictionKind.Ranking;
+        private protected override PredictionKind PredictionKind => PredictionKind.Ranking;
     }
 
     internal static partial class FastTree
@@ -1170,11 +1167,11 @@ namespace Microsoft.ML.Trainers.FastTree
             host.CheckValue(input, nameof(input));
             EntryPointUtils.CheckInputArgs(host, input);
 
-            return LearnerEntryPointsUtils.Train<FastTreeRankingTrainer.Options, CommonOutputs.RankingOutput>(host, input,
+            return TrainerEntryPointsUtils.Train<FastTreeRankingTrainer.Options, CommonOutputs.RankingOutput>(host, input,
                 () => new FastTreeRankingTrainer(host, input),
-                () => LearnerEntryPointsUtils.FindColumn(host, input.TrainingData.Schema, input.LabelColumn),
-                () => LearnerEntryPointsUtils.FindColumn(host, input.TrainingData.Schema, input.WeightColumn),
-                () => LearnerEntryPointsUtils.FindColumn(host, input.TrainingData.Schema, input.GroupIdColumn));
+                () => TrainerEntryPointsUtils.FindColumn(host, input.TrainingData.Schema, input.LabelColumnName),
+                () => TrainerEntryPointsUtils.FindColumn(host, input.TrainingData.Schema, input.ExampleWeightColumnName),
+                () => TrainerEntryPointsUtils.FindColumn(host, input.TrainingData.Schema, input.RowGroupColumnName));
         }
     }
 }

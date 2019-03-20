@@ -6,12 +6,12 @@ using System;
 using Microsoft.ML.CommandLine;
 using Microsoft.ML.Data;
 using Microsoft.ML.Internal.Utilities;
-using Microsoft.ML.Model;
 using Microsoft.ML.Numeric;
+using Microsoft.ML.Runtime;
 
 namespace Microsoft.ML.Trainers.Ensemble
 {
-    internal abstract class BaseMultiCombiner : IMultiClassOutputCombiner, ICanSaveModel
+    internal abstract class BaseMultiCombiner : IMulticlassOutputCombiner, ICanSaveModel
     {
         protected readonly IHost Host;
 
@@ -24,14 +24,14 @@ namespace Microsoft.ML.Trainers.Ensemble
 
         protected readonly bool Normalize;
 
-        internal BaseMultiCombiner(IHostEnvironment env, string name, OptionsBase args)
+        internal BaseMultiCombiner(IHostEnvironment env, string name, OptionsBase options)
         {
             Contracts.AssertValue(env);
             env.AssertNonWhiteSpace(name);
             Host = env.Register(name);
-            Host.CheckValue(args, nameof(args));
+            Host.CheckValue(options, nameof(options));
 
-            Normalize = args.Normalize;
+            Normalize = options.Normalize;
         }
 
         internal BaseMultiCombiner(IHostEnvironment env, string name, ModelLoadContext ctx)

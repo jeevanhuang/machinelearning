@@ -8,18 +8,18 @@ using System.Collections.Generic;
 using System.Collections.Immutable;
 using System.IO;
 using System.Linq;
-using Microsoft.Data.DataView;
 using Microsoft.ML;
-using Microsoft.ML.Calibrator;
+using Microsoft.ML.Calibrators;
 using Microsoft.ML.CommandLine;
 using Microsoft.ML.Data;
 using Microsoft.ML.EntryPoints;
-using Microsoft.ML.Internal.Calibration;
-using Microsoft.ML.Internal.Internallearn;
 using Microsoft.ML.Internal.Utilities;
 using Microsoft.ML.Model;
-using Microsoft.ML.Model.Onnx;
+using Microsoft.ML.Model.OnnxConverter;
 using Microsoft.ML.Model.Pfa;
+using Microsoft.ML.Runtime;
+using Microsoft.ML.Trainers;
+using Microsoft.ML.Transforms;
 using Newtonsoft.Json.Linq;
 
 [assembly: LoadableClass(PlattCalibratorTrainer.Summary, typeof(PlattCalibratorTrainer), null, typeof(SignatureCalibrator),
@@ -49,28 +49,28 @@ using Newtonsoft.Json.Linq;
     PlattCalibrator.LoaderSignature)]
 
 // This is for deserialization from a binary model file.
-[assembly: LoadableClass(typeof(PavCalibrator), null, typeof(SignatureLoadModel),
+[assembly: LoadableClass(typeof(IsotonicCalibrator), null, typeof(SignatureLoadModel),
     "PAV Calibration Executor",
-    PavCalibrator.LoaderSignature)]
+    IsotonicCalibrator.LoaderSignature)]
 
 // This is for deserialization from a binary model file.
 [assembly: LoadableClass(typeof(NaiveCalibrator), null, typeof(SignatureLoadModel),
     "Naive Calibration Executor",
     NaiveCalibrator.LoaderSignature)]
 
-[assembly: LoadableClass(typeof(ValueMapperCalibratedModelParameters<IPredictorProducing<float>, ICalibrator>), null, typeof(SignatureLoadModel),
+[assembly: LoadableClass(typeof(CalibratedModelParametersBase), typeof(ValueMapperCalibratedModelParameters<IPredictorProducing<float>, ICalibrator>), null, typeof(SignatureLoadModel),
     "Calibrated Predictor Executor",
     ValueMapperCalibratedModelParameters<IPredictorProducing<float>, ICalibrator>.LoaderSignature, "BulkCaliPredExec")]
 
-[assembly: LoadableClass(typeof(FeatureWeightsCalibratedModelParameters<IPredictorWithFeatureWeights<float>, ICalibrator>), null, typeof(SignatureLoadModel),
+[assembly: LoadableClass(typeof(CalibratedModelParametersBase), typeof(FeatureWeightsCalibratedModelParameters<IPredictorProducing<float>, ICalibrator>), null, typeof(SignatureLoadModel),
     "Feature Weights Calibrated Predictor Executor",
     FeatureWeightsCalibratedModelParameters<IPredictorWithFeatureWeights<float>, ICalibrator>.LoaderSignature)]
 
-[assembly: LoadableClass(typeof(ParameterMixingCalibratedModelParameters<IPredictorWithFeatureWeights<float>, ICalibrator>), null, typeof(SignatureLoadModel),
+[assembly: LoadableClass(typeof(CalibratedModelParametersBase), typeof(ParameterMixingCalibratedModelParameters<IPredictorProducing<float>, ICalibrator>), null, typeof(SignatureLoadModel),
     "Parameter Mixing Calibrated Predictor Executor",
     ParameterMixingCalibratedModelParameters<IPredictorWithFeatureWeights<float>, ICalibrator>.LoaderSignature)]
 
-[assembly: LoadableClass(typeof(SchemaBindableCalibratedModelParameters<IPredictorProducing<float>, ICalibrator>), null, typeof(SignatureLoadModel),
+[assembly: LoadableClass(typeof(CalibratedModelParametersBase), typeof(SchemaBindableCalibratedModelParameters<IPredictorProducing<float>, ICalibrator>), null, typeof(SignatureLoadModel),
     "Schema Bindable Calibrated Predictor", SchemaBindableCalibratedModelParameters<IPredictorProducing<float>, ICalibrator>.LoaderSignature)]
 
 [assembly: LoadableClass(typeof(void), typeof(Calibrate), null, typeof(SignatureEntryPointModule), "Calibrate")]
@@ -80,7 +80,7 @@ using Newtonsoft.Json.Linq;
 [assembly: EntryPointModule(typeof(PavCalibratorTrainerFactory))]
 [assembly: EntryPointModule(typeof(PlattCalibratorTrainerFactory))]
 
-namespace Microsoft.ML.Internal.Calibration
+namespace Microsoft.ML.Calibrators
 {
     /// <summary>
     /// Signature for the loaders of calibrators.
@@ -147,8 +147,20 @@ namespace Microsoft.ML.Internal.Calibration
     [BestFriend]
     internal interface IWeaklyTypedCalibratedModelParameters
     {
-        IPredictorProducing<float> WeeklyTypedSubModel { get; }
-        ICalibrator WeeklyTypedCalibrator { get; }
+        IPredictorProducing<float> WeaklyTypedSubModel { get; }
+        ICalibrator WeaklyTypedCalibrator { get; }
+    }
+
+    public abstract class CalibratedModelParametersBase
+    {
+        public object SubModel { get; }
+        public ICalibrator Calibrator { get; }
+
+        private protected CalibratedModelParametersBase(object subModel, ICalibrator calibrator)
+        {
+            SubModel = subModel;
+            Calibrator = calibrator;
+        }
     }
 
     /// <summary>
@@ -162,7 +174,7 @@ namespace Microsoft.ML.Internal.Calibration
     /// output value to the probability of belonging to the positive (or negative) class. Detailed math materials
     /// can be found at <a href="https://www.csie.ntu.edu.tw/~cjlin/papers/plattprob.pdf">this paper</a>.
     /// </remarks>
-    public abstract class CalibratedModelParametersBase<TSubModel, TCalibrator> :
+    public abstract class CalibratedModelParametersBase<TSubModel, TCalibrator> : CalibratedModelParametersBase,
         IDistPredictorProducing<float, float>,
         ICanSaveInIniFormat,
         ICanSaveInTextFormat,
@@ -170,34 +182,37 @@ namespace Microsoft.ML.Internal.Calibration
         ICanSaveSummary,
         ICanGetSummaryInKeyValuePairs,
         IWeaklyTypedCalibratedModelParameters
-        where TSubModel : class, IPredictorProducing<float>
+        where TSubModel : class
         where TCalibrator : class, ICalibrator
     {
-        protected readonly IHost Host;
+        private protected readonly IHost Host;
 
         // Strongly-typed members.
         /// <summary>
         /// <see cref="SubModel"/>'s output would calibrated by <see cref="Calibrator"/>.
         /// </summary>
-        public TSubModel SubModel { get; }
+        public new TSubModel SubModel { get; }
+
         /// <summary>
         /// <see cref="Calibrator"/> is used to post-process score produced by <see cref="SubModel"/>.
         /// </summary>
-        public TCalibrator Calibrator { get; }
+        public new TCalibrator Calibrator { get; }
 
         // Type-unsafed accessors of strongly-typed members.
-        IPredictorProducing<float> IWeaklyTypedCalibratedModelParameters.WeeklyTypedSubModel => SubModel;
-        ICalibrator IWeaklyTypedCalibratedModelParameters.WeeklyTypedCalibrator => Calibrator;
+        IPredictorProducing<float> IWeaklyTypedCalibratedModelParameters.WeaklyTypedSubModel => (IPredictorProducing<float>)SubModel;
+        ICalibrator IWeaklyTypedCalibratedModelParameters.WeaklyTypedCalibrator => Calibrator;
 
-        public PredictionKind PredictionKind => SubModel.PredictionKind;
+        PredictionKind IPredictor.PredictionKind => ((IPredictorProducing<float>)SubModel).PredictionKind;
 
         private protected CalibratedModelParametersBase(IHostEnvironment env, string name, TSubModel predictor, TCalibrator calibrator)
+            : base(predictor, calibrator)
         {
             Contracts.CheckValue(env, nameof(env));
             env.CheckNonWhiteSpace(name, nameof(name));
             Host = env.Register(name);
             Host.CheckValue(predictor, nameof(predictor));
             Host.CheckValue(calibrator, nameof(calibrator));
+            Host.Assert(predictor is IPredictorProducing<float>);
 
             SubModel = predictor;
             Calibrator = calibrator;
@@ -270,7 +285,7 @@ namespace Microsoft.ML.Internal.Calibration
         CalibratedModelParametersBase<TSubModel, TCalibrator>,
         IValueMapperDist, IFeatureContributionMapper, ICalculateFeatureContribution,
         IDistCanSavePfa, IDistCanSaveOnnx
-        where TSubModel : class, IPredictorProducing<float>
+        where TSubModel : class
         where TCalibrator : class, ICalibrator
     {
         private readonly IValueMapper _mapper;
@@ -281,7 +296,7 @@ namespace Microsoft.ML.Internal.Calibration
         DataViewType IValueMapperDist.DistType => NumberDataViewType.Single;
         bool ICanSavePfa.CanSavePfa => (_mapper as ICanSavePfa)?.CanSavePfa == true;
 
-        public FeatureContributionCalculator FeatureContributionCalculator => new FeatureContributionCalculator(this);
+        FeatureContributionCalculator ICalculateFeatureContribution.FeatureContributionCalculator => new FeatureContributionCalculator(this);
 
         bool ICanSaveOnnx.CanSaveOnnx(OnnxContext ctx) => (_mapper as ICanSaveOnnx)?.CanSaveOnnx(ctx) == true;
 
@@ -380,7 +395,7 @@ namespace Microsoft.ML.Internal.Calibration
     [BestFriend]
     internal sealed class ValueMapperCalibratedModelParameters<TSubModel, TCalibrator> :
         ValueMapperCalibratedModelParametersBase<TSubModel, TCalibrator>, ICanSaveModel
-        where TSubModel : class, IPredictorProducing<float>
+        where TSubModel : class
         where TCalibrator : class, ICalibrator
     {
         internal ValueMapperCalibratedModelParameters(IHostEnvironment env, TSubModel predictor, TCalibrator calibrator)
@@ -417,7 +432,7 @@ namespace Microsoft.ML.Internal.Calibration
         {
         }
 
-        private static ValueMapperCalibratedModelParameters<TSubModel, TCalibrator> Create(IHostEnvironment env, ModelLoadContext ctx)
+        private static CalibratedModelParametersBase Create(IHostEnvironment env, ModelLoadContext ctx)
         {
             Contracts.CheckValue(ctx, nameof(ctx));
             // Can load either the old "bulk" model or standard "cali". The two formats are identical.
@@ -442,7 +457,7 @@ namespace Microsoft.ML.Internal.Calibration
         ValueMapperCalibratedModelParametersBase<TSubModel, TCalibrator>,
         IPredictorWithFeatureWeights<float>,
         ICanSaveModel
-        where TSubModel : class, IPredictorWithFeatureWeights<float>
+        where TSubModel : class
         where TCalibrator : class, ICalibrator
     {
         private readonly IPredictorWithFeatureWeights<float> _featureWeights;
@@ -451,7 +466,8 @@ namespace Microsoft.ML.Internal.Calibration
             TCalibrator calibrator)
             : base(env, RegistrationName, predictor, calibrator)
         {
-            _featureWeights = predictor;
+            Host.Assert(predictor is IPredictorWithFeatureWeights<float>);
+            _featureWeights = predictor as IPredictorWithFeatureWeights<float>;
         }
 
         internal const string LoaderSignature = "FeatWCaliPredExec";
@@ -475,7 +491,7 @@ namespace Microsoft.ML.Internal.Calibration
             _featureWeights = (IPredictorWithFeatureWeights<float>)SubModel;
         }
 
-        private static FeatureWeightsCalibratedModelParameters<TSubModel, TCalibrator> Create(IHostEnvironment env, ModelLoadContext ctx)
+        private static CalibratedModelParametersBase Create(IHostEnvironment env, ModelLoadContext ctx)
         {
             Contracts.CheckValue(env, nameof(env));
             env.CheckValue(ctx, nameof(ctx));
@@ -506,7 +522,7 @@ namespace Microsoft.ML.Internal.Calibration
         IParameterMixer<float>,
         IPredictorWithFeatureWeights<float>,
         ICanSaveModel
-        where TSubModel : class, IPredictorWithFeatureWeights<float>
+        where TSubModel : class
         where TCalibrator : class, ICalibrator
     {
         private readonly IPredictorWithFeatureWeights<float> _featureWeights;
@@ -516,7 +532,8 @@ namespace Microsoft.ML.Internal.Calibration
         {
             Host.Check(predictor is IParameterMixer<float>, "Predictor does not implement " + nameof(IParameterMixer<float>));
             Host.Check(calibrator is IParameterMixer, "Calibrator does not implement " + nameof(IParameterMixer));
-            _featureWeights = predictor;
+            Host.Assert(predictor is IPredictorWithFeatureWeights<float>);
+            _featureWeights = predictor as IPredictorWithFeatureWeights<float>;
         }
 
         internal const string LoaderSignature = "PMixCaliPredExec";
@@ -538,10 +555,10 @@ namespace Microsoft.ML.Internal.Calibration
         {
             Host.Check(SubModel is IParameterMixer<float>, "Predictor does not implement " + nameof(IParameterMixer));
             Host.Check(SubModel is IPredictorWithFeatureWeights<float>, "Predictor does not implement " + nameof(IPredictorWithFeatureWeights<float>));
-            _featureWeights = SubModel;
+            _featureWeights = SubModel as IPredictorWithFeatureWeights<float>;
         }
 
-        private static ParameterMixingCalibratedModelParameters<TSubModel, TCalibrator> Create(IHostEnvironment env, ModelLoadContext ctx)
+        private static CalibratedModelParametersBase Create(IHostEnvironment env, ModelLoadContext ctx)
         {
             Contracts.CheckValue(env, nameof(env));
             env.CheckValue(ctx, nameof(ctx));
@@ -587,7 +604,7 @@ namespace Microsoft.ML.Internal.Calibration
     [BestFriend]
     internal sealed class SchemaBindableCalibratedModelParameters<TSubModel, TCalibrator> : CalibratedModelParametersBase<TSubModel, TCalibrator>, ISchemaBindableMapper, ICanSaveModel,
         IBindableCanSavePfa, IBindableCanSaveOnnx, IFeatureContributionMapper
-        where TSubModel : class, IPredictorProducing<float>
+        where TSubModel : class
         where TCalibrator : class, ICalibrator
     {
         private sealed class Bound : ISchemaBoundRowMapper
@@ -608,21 +625,22 @@ namespace Microsoft.ML.Internal.Calibration
                 _parent = parent;
                 _predictor = _parent._bindable.Bind(env, schema) as ISchemaBoundRowMapper;
                 env.Check(_predictor != null, "Predictor is not a row-to-row mapper");
-                if (!_predictor.OutputSchema.TryGetColumnIndex(MetadataUtils.Const.ScoreValueKind.Score, out _scoreCol))
+                if (!_predictor.OutputSchema.TryGetColumnIndex(AnnotationUtils.Const.ScoreValueKind.Score, out _scoreCol))
                     throw env.Except("Predictor does not output a score");
                 var scoreType = _predictor.OutputSchema[_scoreCol].Type;
                 env.Check(scoreType is NumberDataViewType);
                 OutputSchema = ScoreSchemaFactory.CreateBinaryClassificationSchema();
             }
 
-            public Func<int, bool> GetDependencies(Func<int, bool> predicate)
+            /// <summary>
+            /// Given a set of columns, return the input columns that are needed to generate those output columns.
+            /// </summary>
+            IEnumerable<DataViewSchema.Column> ISchemaBoundRowMapper.GetDependenciesForNewColumns(IEnumerable<DataViewSchema.Column> dependingColumns)
             {
-                for (int i = 0; i < OutputSchema.Count; i++)
-                {
-                    if (predicate(i))
-                        return _predictor.GetDependencies(col => true);
-                }
-                return col => false;
+                if (dependingColumns.Count() > 0)
+                    return _predictor.GetDependenciesForNewColumns(OutputSchema);
+
+                return Enumerable.Empty<DataViewSchema.Column>();
             }
 
             public IEnumerable<KeyValuePair<RoleMappedSchema.ColumnRole, string>> GetInputColumnRoles()
@@ -630,35 +648,30 @@ namespace Microsoft.ML.Internal.Calibration
                 return _predictor.GetInputColumnRoles();
             }
 
-            public DataViewRow GetRow(DataViewRow input, Func<int, bool> predicate)
+            DataViewRow ISchemaBoundRowMapper.GetRow(DataViewRow input, IEnumerable<DataViewSchema.Column> activeColumns)
             {
-                Func<int, bool> predictorPredicate = col => false;
-                for (int i = 0; i < OutputSchema.Count; i++)
-                {
-                    if (predicate(i))
-                    {
-                        predictorPredicate = col => true;
-                        break;
-                    }
-                }
-                var predictorRow = _predictor.GetRow(input, predictorPredicate);
+                var predictorRow = _predictor.GetRow(input, activeColumns.Count() > 0 ? OutputSchema : Enumerable.Empty<DataViewSchema.Column>());
                 var getters = new Delegate[OutputSchema.Count];
-                for (int i = 0; i < OutputSchema.Count - 1; i++)
+
+                bool hasProbabilityColumn = false;
+                foreach (var column in activeColumns)
                 {
-                    var type = predictorRow.Schema[i].Type;
-                    if (!predicate(i))
+                    if (column.Index == OutputSchema.Count - 1)
+                    {
+                        hasProbabilityColumn = true;
                         continue;
-                    getters[i] = Utils.MarshalInvoke(GetPredictorGetter<int>, type.RawType, predictorRow, i);
+                    }
+                    var type = predictorRow.Schema[column.Index].Type;
+                    getters[column.Index] = Utils.MarshalInvoke(GetPredictorGetter<int>, type.RawType, predictorRow, column.Index);
                 }
-                if (predicate(OutputSchema.Count - 1))
+
+                if (hasProbabilityColumn)
                     getters[OutputSchema.Count - 1] = GetProbGetter(predictorRow);
                 return new SimpleRow(OutputSchema, predictorRow, getters);
             }
 
             private Delegate GetPredictorGetter<T>(DataViewRow input, int col)
-            {
-                return input.GetGetter<T>(col);
-            }
+                =>input.GetGetter<T>(input.Schema[col]);
 
             private Delegate GetProbGetter(DataViewRow input)
             {
@@ -701,18 +714,18 @@ namespace Microsoft.ML.Internal.Calibration
         internal SchemaBindableCalibratedModelParameters(IHostEnvironment env, TSubModel predictor, TCalibrator calibrator)
             : base(env, LoaderSignature, predictor, calibrator)
         {
-            _bindable = ScoreUtils.GetSchemaBindableMapper(Host, SubModel);
+            _bindable = ScoreUtils.GetSchemaBindableMapper(Host, SubModel as IPredictorProducing<float>);
             _featureContribution = SubModel as IFeatureContributionMapper;
         }
 
         private SchemaBindableCalibratedModelParameters(IHostEnvironment env, ModelLoadContext ctx)
             : base(env, LoaderSignature, GetPredictor(env, ctx), GetCalibrator(env, ctx))
         {
-            _bindable = ScoreUtils.GetSchemaBindableMapper(Host, SubModel);
+            _bindable = ScoreUtils.GetSchemaBindableMapper(Host, SubModel as IPredictorProducing<float>);
             _featureContribution = SubModel as IFeatureContributionMapper;
         }
 
-        private static SchemaBindableCalibratedModelParameters<TSubModel, TCalibrator> Create(IHostEnvironment env, ModelLoadContext ctx)
+        private static CalibratedModelParametersBase Create(IHostEnvironment env, ModelLoadContext ctx)
         {
             Contracts.CheckValue(ctx, nameof(ctx));
             ctx.CheckAtModel(GetVersionInfo());
@@ -804,7 +817,7 @@ namespace Microsoft.ML.Internal.Calibration
             var bound = bindable.Bind(env, schema);
             var outputSchema = bound.OutputSchema;
             int scoreCol;
-            if (!outputSchema.TryGetColumnIndex(MetadataUtils.Const.ScoreValueKind.Score, out scoreCol))
+            if (!outputSchema.TryGetColumnIndex(AnnotationUtils.Const.ScoreValueKind.Score, out scoreCol))
             {
                 ch.Info("Not training a calibrator because the predictor does not output a score column.");
                 return false;
@@ -1110,20 +1123,22 @@ namespace Microsoft.ML.Internal.Calibration
         public readonly float Min;
 
         /// <summary> The value of probability in each bin.</summary>
-        public readonly float[] BinProbs;
+        public IReadOnlyList<float> BinProbs => _binProbs;
+
+        private readonly float[] _binProbs;
 
         /// <summary> Initializes a new instance of <see cref="NaiveCalibrator"/>.</summary>
         /// <param name="env">The <see cref="IHostEnvironment"/> to use.</param>
         /// <param name="min">The minimum value in the first bin.</param>
         /// <param name="binProbs">The values of the probability in each bin.</param>
         /// <param name="binSize">The bin size.</param>
-        public NaiveCalibrator(IHostEnvironment env, float min, float binSize, float[] binProbs)
+        internal NaiveCalibrator(IHostEnvironment env, float min, float binSize, float[] binProbs)
         {
             Contracts.CheckValue(env, nameof(env));
             _host = env.Register(RegistrationName);
             Min = min;
             BinSize = binSize;
-            BinProbs = binProbs;
+            _binProbs = binProbs;
         }
 
         private NaiveCalibrator(IHostEnvironment env, ModelLoadContext ctx)
@@ -1147,9 +1162,9 @@ namespace Microsoft.ML.Internal.Calibration
             Min = ctx.Reader.ReadFloat();
             _host.CheckDecode(FloatUtils.IsFinite(Min));
 
-            BinProbs = ctx.Reader.ReadFloatArray();
-            _host.CheckDecode(Utils.Size(BinProbs) > 0);
-            _host.CheckDecode(BinProbs.All(x => (0 <= x && x <= 1)));
+            _binProbs = ctx.Reader.ReadFloatArray();
+            _host.CheckDecode(Utils.Size(_binProbs) > 0);
+            _host.CheckDecode(_binProbs.All(x => (0 <= x && x <= 1)));
         }
 
         private static NaiveCalibrator Create(IHostEnvironment env, ModelLoadContext ctx)
@@ -1180,7 +1195,7 @@ namespace Microsoft.ML.Internal.Calibration
             ctx.Writer.Write(sizeof(float));
             ctx.Writer.Write(BinSize);
             ctx.Writer.Write(Min);
-            ctx.Writer.WriteSingleArray(BinProbs);
+            ctx.Writer.WriteSingleArray(_binProbs);
         }
 
         /// <summary>
@@ -1190,8 +1205,8 @@ namespace Microsoft.ML.Internal.Calibration
         {
             if (float.IsNaN(output))
                 return output;
-            int binIdx = GetBinIdx(output, Min, BinSize, BinProbs.Length);
-            return BinProbs[binIdx];
+            int binIdx = GetBinIdx(output, Min, BinSize, _binProbs.Length);
+            return _binProbs[binIdx];
         }
 
         // get the bin for a given output
@@ -1205,11 +1220,6 @@ namespace Microsoft.ML.Internal.Calibration
             return binIdx;
         }
 
-        /// <summary> Get the summary of current calibrator settings </summary>
-        public string GetSummary()
-        {
-            return string.Format("Naive Calibrator has {0} bins, starting at {1}, with bin size of {2}", BinProbs.Length, Min, BinSize);
-        }
     }
 
     /// <summary>
@@ -1218,8 +1228,91 @@ namespace Microsoft.ML.Internal.Calibration
     [BestFriend]
     internal abstract class CalibratorTrainerBase : ICalibratorTrainer
     {
+        public sealed class DataStore : IEnumerable<DataStore.DataItem>
+        {
+            public readonly struct DataItem
+            {
+                // The actual binary label of this example.
+                public readonly bool Target;
+                // The weight associated with this example.
+                public readonly float Weight;
+                // The output of the example.
+                public readonly float Score;
+
+                public DataItem(bool target, float weight, float score)
+                {
+                    Target = target;
+                    Weight = weight;
+                    Score = score;
+                }
+            }
+
+            // REVIEW: Should probably be a long.
+            private int _itemsSeen;
+            private readonly Random _random;
+
+            private static int _randSeed;
+
+            private readonly int _capacity;
+            private DataItem[] _data;
+            private bool _dataSorted;
+
+            public DataStore()
+                : this(1000000)
+            {
+            }
+
+            public DataStore(int capacity)
+            {
+                Contracts.CheckParam(capacity > 0, nameof(capacity), "must be positive");
+
+                _capacity = capacity;
+                _data = new DataItem[Math.Min(4, capacity)];
+                // REVIEW: Horrifying. At a point when we have the IHost stuff plumbed through
+                // calibrator training and also have the appetite to change a bunch of baselines, this
+                // should be seeded using the host random.
+                _random = new System.Random(System.Threading.Interlocked.Increment(ref _randSeed) - 1);
+            }
+
+            /// <summary>
+            /// An enumerator over the <see cref="DataItem"/> entries sorted by score.
+            /// </summary>
+            /// <returns></returns>
+            public IEnumerator<DataItem> GetEnumerator()
+            {
+                if (!_dataSorted)
+                {
+                    var comp = Comparer<DataItem>.Create((x, y) => x.Score.CompareTo(y.Score));
+                    Array.Sort(_data, 0, Math.Min(_itemsSeen, _capacity), comp);
+                    _dataSorted = true;
+                }
+                return _data.Take(_itemsSeen).GetEnumerator();
+            }
+
+            IEnumerator IEnumerable.GetEnumerator()
+            {
+                return GetEnumerator();
+            }
+
+            public void AddToStore(float score, bool isPositive, float weight)
+            {
+                // Can't calibrate NaN scores.
+                if (weight == 0 || float.IsNaN(score))
+                    return;
+                int index = _itemsSeen++;
+                if (_itemsSeen <= _capacity)
+                    Utils.EnsureSize(ref _data, _itemsSeen, _capacity);
+                else
+                {
+                    index = _random.Next(_itemsSeen); // 0 to items_seen - 1.
+                    if (index >= _capacity) // Don't keep it.
+                        return;
+                }
+                _data[index] = new DataItem(isPositive, weight, score);
+            }
+        }
         protected readonly IHost Host;
-        protected CalibrationDataStore Data;
+        protected DataStore Data;
         protected const int DefaultMaxNumSamples = 1000000;
         protected int MaxNumSamples;
 
@@ -1239,7 +1332,7 @@ namespace Microsoft.ML.Internal.Calibration
         bool ICalibratorTrainer.ProcessTrainingExample(float output, bool labelIs1, float weight)
         {
             if (Data == null)
-                Data = new CalibrationDataStore(MaxNumSamples);
+                Data = new DataStore(MaxNumSamples);
             Data.AddToStore(output, labelIs1, weight);
             return true;
         }
@@ -1466,8 +1559,10 @@ namespace Microsoft.ML.Internal.Calibration
         ICalibrator ICalibratorTrainer.FinishTraining(IChannel ch) => new PlattCalibrator(_host, _slope, _offset);
     }
 
-    ///<summary> The Platt calibrator calculates the probability following:
-    /// P(x) = 1 / (1 + exp(-<see cref="PlattCalibrator.Slope"/> * x + <see cref="PlattCalibrator.Offset"/>) </summary>.
+    ///<summary>
+    /// The Platt calibrator calculates the probability following:
+    /// P(x) = 1 / (1 + exp(-<see cref="PlattCalibrator.Slope"/> * x + <see cref="PlattCalibrator.Offset"/>)
+    /// </summary>.
     public sealed class PlattCalibrator : ICalibrator, IParameterMixer, ICanSaveModel, ISingleCanSavePfa, ISingleCanSaveOnnx
     {
         internal const string LoaderSignature = "PlattCaliExec";
@@ -1485,7 +1580,13 @@ namespace Microsoft.ML.Internal.Calibration
 
         private readonly IHost _host;
 
+        /// <summary>
+        /// Slope value for this calibrator.
+        /// </summary>
         public Double Slope { get; }
+        /// <summary>
+        /// Offset value for this calibrator
+        /// </summary>
         public Double Offset { get; }
         bool ICanSavePfa.CanSavePfa => true;
         bool ICanSaveOnnx.CanSaveOnnx(OnnxContext ctx) => true;
@@ -1493,7 +1594,7 @@ namespace Microsoft.ML.Internal.Calibration
         /// <summary>
         /// Initializes a new instance of <see cref="PlattCalibrator"/>.
         /// </summary>
-        public PlattCalibrator(IHostEnvironment env, Double slope, Double offset)
+        internal PlattCalibrator(IHostEnvironment env, Double slope, Double offset)
         {
             Contracts.CheckValue(env, nameof(env));
             _host = env.Register(RegistrationName);
@@ -1556,6 +1657,7 @@ namespace Microsoft.ML.Internal.Calibration
             }
         }
 
+        /// <summary> Given a classifier output, produce the probability.</summary>
         public float PredictProbability(float output)
         {
             if (float.IsNaN(output))
@@ -1563,7 +1665,7 @@ namespace Microsoft.ML.Internal.Calibration
             return PredictProbability(output, Slope, Offset);
         }
 
-        public static float PredictProbability(float output, Double a, Double b)
+        internal static float PredictProbability(float output, Double a, Double b)
         {
             return (float)(1 / (1 + Math.Exp(a * output + b)));
         }
@@ -1595,11 +1697,6 @@ namespace Microsoft.ML.Internal.Calibration
                 new[] { scoreProbablityColumnNames[1] }, ctx.GetNodeName(opType), "");
 
             return true;
-        }
-
-        public string GetSummary()
-        {
-            return string.Format("Platt calibrator parameters: A={0}, B={1}", Slope, Offset);
         }
 
         IParameterMixer IParameterMixer.CombineParameters(IList<IParameterMixer> calibrators)
@@ -1697,19 +1794,24 @@ namespace Microsoft.ML.Internal.Calibration
                 values[i] = top.Value;
             }
 
-            return new PavCalibrator(Host, mins.ToImmutableArray(), maxes.ToImmutableArray(), values.ToImmutableArray());
+            return new IsotonicCalibrator(Host, mins.ToImmutableArray(), maxes.ToImmutableArray(), values.ToImmutableArray());
         }
     }
 
     /// <summary>
-    /// The pair-adjacent violators calibrator.
-    /// The function that is implemented by this calibrator is:
-    /// f(x) = v_i, if minX_i &lt;= x &lt;= maxX_i
-    ///      = linear interpolate between v_i and v_i+1, if maxX_i &lt; x &lt; minX_i+1
-    ///      = v_0, if x &lt; minX_0
-    ///      = v_n, if x &gt; maxX_n
+    /// The isotonic calibrator.
     /// </summary>
-    public sealed class PavCalibrator : ICalibrator, ICanSaveInBinaryFormat
+    /// <remarks>
+    /// The function that is implemented by this calibrator is:
+    /// P(x) =
+    /// <list type="bullet">
+    /// <item><description><see cref="Values"/>[i], if <see cref="Mins"/>[i] &lt;= x &lt;= <see cref="Maxes"/>[i]</description>></item>
+    /// <item> <description>Linear interpolation between <see cref="Values"/>[i] and <see cref="Values"/>[i+1], if <see cref="Maxes"/>[i] &lt; x &lt; <see cref="Mins"/>[i+1]</description></item>
+    /// <item><description><see cref="Values"/>[0], if x &lt; <see cref="Mins"/>[0]</description></item>
+    /// <item><description><see cref="Values"/>[n], if x &gt; <see cref="Maxes"/>[n]</description></item>
+    ///</list>
+    /// </remarks>
+    public sealed class IsotonicCalibrator : ICalibrator, ICanSaveInBinaryFormat
     {
         internal const string LoaderSignature = "PAVCaliExec";
         internal const string RegistrationName = "PAVCalibrator";
@@ -1722,7 +1824,7 @@ namespace Microsoft.ML.Internal.Calibration
                 verReadableCur: 0x00010001,
                 verWeCanReadBack: 0x00010001,
                 loaderSignature: LoaderSignature,
-                loaderAssemblyName: typeof(PavCalibrator).Assembly.FullName);
+                loaderAssemblyName: typeof(IsotonicCalibrator).Assembly.FullName);
         }
 
         // Epsilon for 0-comparisons
@@ -1731,18 +1833,27 @@ namespace Microsoft.ML.Internal.Calibration
         private const float MaxToReturn = 1 - Epsilon; // max predicted is 1 - min;
 
         private readonly IHost _host;
+        /// <summary>
+        /// Bottom borders of PAV intervals.
+        /// </summary>
         public readonly ImmutableArray<float> Mins;
+        /// <summary>
+        /// Upper borders of PAV intervals.
+        /// </summary>
         public readonly ImmutableArray<float> Maxes;
+        /// <summary>
+        /// Values of PAV intervals.
+        /// </summary>
         public readonly ImmutableArray<float> Values;
 
         /// <summary>
-        /// Initializes a new instance of <see cref="PavCalibrator"/>.
+        /// Initializes a new instance of <see cref="IsotonicCalibrator"/>.
         /// </summary>
         /// <param name="env">The <see cref="IHostEnvironment"/> to use.</param>
         /// <param name="mins">The minimum values for each piece.</param>
         /// <param name="maxes">The maximum values for each piece.</param>
         /// <param name="values">The actual values for each piece.</param>
-        public PavCalibrator(IHostEnvironment env, ImmutableArray<float> mins, ImmutableArray<float> maxes, ImmutableArray<float> values)
+        internal IsotonicCalibrator(IHostEnvironment env, ImmutableArray<float> mins, ImmutableArray<float> maxes, ImmutableArray<float> values)
         {
             Contracts.AssertValue(env);
             _host = env.Register(RegistrationName);
@@ -1760,7 +1871,7 @@ namespace Microsoft.ML.Internal.Calibration
             Values = values;
         }
 
-        private PavCalibrator(IHostEnvironment env, ModelLoadContext ctx)
+        private IsotonicCalibrator(IHostEnvironment env, ModelLoadContext ctx)
         {
             Contracts.AssertValue(env);
             _host = env.Register(RegistrationName);
@@ -1804,12 +1915,12 @@ namespace Microsoft.ML.Internal.Calibration
             _host.CheckDecode(valuePrev <= 1);
         }
 
-        private static PavCalibrator Create(IHostEnvironment env, ModelLoadContext ctx)
+        private static IsotonicCalibrator Create(IHostEnvironment env, ModelLoadContext ctx)
         {
             Contracts.CheckValue(env, nameof(env));
             env.CheckValue(ctx, nameof(ctx));
             ctx.CheckAtModel(GetVersionInfo());
-            return new PavCalibrator(env, ctx);
+            return new IsotonicCalibrator(env, ctx);
         }
 
         void ICanSaveInBinaryFormat.SaveAsBinary(BinaryWriter writer)
@@ -1851,6 +1962,7 @@ namespace Microsoft.ML.Internal.Calibration
             _host.CheckDecode(valuePrev <= 1);
         }
 
+        /// <summary> Given a classifier output, produce the probability.</summary>
         public float PredictProbability(float output)
         {
             if (float.IsNaN(output))
@@ -1889,95 +2001,6 @@ namespace Microsoft.ML.Internal.Calibration
             // between pieces, interpolate
             float t = (score - Maxes[pos - 1]) / (Mins[pos] - Maxes[pos - 1]);
             return Values[pos - 1] + t * (Values[pos] - Values[pos - 1]);
-        }
-
-        public string GetSummary()
-        {
-            return string.Format("PAV calibrator with {0} intervals", Mins.Length);
-        }
-    }
-
-    public sealed class CalibrationDataStore : IEnumerable<CalibrationDataStore.DataItem>
-    {
-        public readonly struct DataItem
-        {
-            // The actual binary label of this example.
-            public readonly bool Target;
-            // The weight associated with this example.
-            public readonly float Weight;
-            // The output of the example.
-            public readonly float Score;
-
-            public DataItem(bool target, float weight, float score)
-            {
-                Target = target;
-                Weight = weight;
-                Score = score;
-            }
-        }
-
-        // REVIEW: Should probably be a long.
-        private int _itemsSeen;
-        private readonly Random _random;
-
-        private static int _randSeed;
-
-        private readonly int _capacity;
-        private DataItem[] _data;
-        private bool _dataSorted;
-
-        public CalibrationDataStore()
-            : this(1000000)
-        {
-        }
-
-        public CalibrationDataStore(int capacity)
-        {
-            Contracts.CheckParam(capacity > 0, nameof(capacity), "must be positive");
-
-            _capacity = capacity;
-            _data = new DataItem[Math.Min(4, capacity)];
-            // REVIEW: Horrifying. At a point when we have the IHost stuff plumbed through
-            // calibrator training and also have the appetite to change a bunch of baselines, this
-            // should be seeded using the host random.
-            _random = new System.Random(System.Threading.Interlocked.Increment(ref _randSeed) - 1);
-        }
-
-        /// <summary>
-        /// An enumerator over the <see cref="DataItem"/> entries sorted by score.
-        /// </summary>
-        /// <returns></returns>
-        public IEnumerator<DataItem> GetEnumerator()
-        {
-            if (!_dataSorted)
-            {
-                var comp = Comparer<DataItem>.Create((x, y) => x.Score.CompareTo(y.Score));
-                Array.Sort(_data, 0, Math.Min(_itemsSeen, _capacity), comp);
-                _dataSorted = true;
-            }
-            return _data.Take(_itemsSeen).GetEnumerator();
-        }
-
-        IEnumerator IEnumerable.GetEnumerator()
-        {
-            return GetEnumerator();
-        }
-
-        public void AddToStore(float score, bool isPositive, float weight)
-        {
-            // Can't calibrate NaN scores.
-            if (weight == 0 || float.IsNaN(score))
-                return;
-            int index = _itemsSeen++;
-            if (_itemsSeen <= _capacity)
-                Utils.EnsureSize(ref _data, _itemsSeen, _capacity);
-            else
-            {
-                index = _random.Next(_itemsSeen); // 0 to items_seen - 1.
-                if (index >= _capacity) // Don't keep it.
-                    return;
-            }
-            _data[index] = new DataItem(isPositive, weight, score);
         }
     }
 

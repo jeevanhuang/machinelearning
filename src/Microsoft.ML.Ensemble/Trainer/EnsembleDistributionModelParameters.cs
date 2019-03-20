@@ -6,11 +6,10 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
-using Microsoft.Data.DataView;
 using Microsoft.ML;
 using Microsoft.ML.Data;
 using Microsoft.ML.Internal.Utilities;
-using Microsoft.ML.Model;
+using Microsoft.ML.Runtime;
 using Microsoft.ML.Trainers.Ensemble;
 
 // These are for deserialization from a model repository.
@@ -51,7 +50,7 @@ namespace Microsoft.ML.Trainers.Ensemble
         DataViewType IValueMapper.OutputType => NumberDataViewType.Single;
         DataViewType IValueMapperDist.DistType => NumberDataViewType.Single;
 
-        public override PredictionKind PredictionKind { get; }
+        private protected override PredictionKind PredictionKind { get; }
 
         /// <summary>
         /// Instantiate new ensemble model from existing sub-models.

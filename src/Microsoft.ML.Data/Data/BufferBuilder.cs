@@ -4,6 +4,7 @@
 
 using System;
 using Microsoft.ML.Internal.Utilities;
+using Microsoft.ML.Runtime;
 
 namespace Microsoft.ML.Data
 {
@@ -14,7 +15,8 @@ namespace Microsoft.ML.Data
     /// with some of the esoteric stuff "protected" instead of "public". This is so callees can't
     /// abuse an instance of it.
     /// </summary>
-    public sealed class BufferBuilder<T>
+    [BestFriend]
+    internal sealed class BufferBuilder<T>
     {
         // Don't walk more than this many items when doing an insert.
         private const int InsertThreshold = 20;

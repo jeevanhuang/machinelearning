@@ -3,16 +3,17 @@
 // See the LICENSE file in the project root for more information.
 
 using System;
-using Microsoft.Data.DataView;
 using Microsoft.ML.Data;
 using Microsoft.ML.Internal.Utilities;
+using Microsoft.ML.Runtime;
 
 namespace Microsoft.ML.Internal.Internallearn
 {
     /// <summary>
     /// Drops slots from a fixed or variable sized column based on slot ranges.
     /// </summary>
-    public sealed class SlotDropper
+    [BestFriend]
+    internal sealed class SlotDropper
     {
         private readonly int[] _lengthReduction;
 

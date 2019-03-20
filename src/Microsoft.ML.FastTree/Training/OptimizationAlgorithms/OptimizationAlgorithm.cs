@@ -4,11 +4,12 @@
 
 using System;
 using System.Collections.Generic;
+using Microsoft.ML.Runtime;
 
 namespace Microsoft.ML.Trainers.FastTree
 {
     //An interface that can be implemnted on
-    public interface IFastTrainingScoresUpdate
+    internal interface IFastTrainingScoresUpdate
     {
         ScoreTracker GetUpdatedTrainingScores();
     }
